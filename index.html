@@ -1,645 +1,465 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>BrickBuilder Kids - Fun Edition</title>
-    
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Babel -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-    <!-- Import Map: Pinned for Stability -->
-    <script type="importmap">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>BrickBuilder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="importmap">
     {
-        "imports": {
-            "react": "https://esm.sh/react@18.2.0",
-            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-            "react-dom": "https://esm.sh/react-dom@18.2.0",
-            "three": "https://esm.sh/three@0.154.0",
-            "three/src/math/MathUtils": "https://esm.sh/three@0.154.0/src/math/MathUtils",
-            "three/src/math/ColorManagement": "https://esm.sh/three@0.154.0/src/math/ColorManagement",
-            "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.13.0?external=react,react-dom,three",
-            "@react-three/drei": "https://esm.sh/@react-three/drei@9.74.0?external=react,react-dom,three,@react-three/fiber",
-            "@react-three/xr": "https://esm.sh/@react-three/xr@5.2.0?external=react,react-dom,three,@react-three/fiber",
-            "uuid": "https://esm.sh/uuid@9.0.1"
-        }
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "three": "https://esm.sh/three@0.154.0",
+        "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.13.0?external=react,react-dom,three",
+        "@react-three/drei": "https://esm.sh/@react-three/drei@9.74.0?external=react,react-dom,three,@react-three/fiber",
+        "three/examples/jsm/exporters/STLExporter.js": "https://esm.sh/three@0.154.0/examples/jsm/exporters/STLExporter.js",
+        "three/examples/jsm/exporters/OBJExporter.js": "https://esm.sh/three@0.154.0/examples/jsm/exporters/OBJExporter.js"
+      }
     }
-    </script>
-
-    <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #0f172a; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        canvas { touch-action: none; outline: none; }
-        
-        /* Fun Animations */
-        @keyframes popIn { 0% { transform: scale(0); } 80% { transform: scale(1.1); } 100% { transform: scale(1); } }
-        .btn-pop { animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-        .btn-press:active { transform: scale(0.9); }
-        
-        #loader {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: #0f172a; display: flex; flex-direction: column;
-            justify-content: center; align-items: center; color: white;
-            z-index: 9999; transition: opacity 0.5s ease; font-family: sans-serif;
-        }
-        .spinner {
-            width: 60px; height: 60px; border: 8px solid rgba(255,255,255,0.1);
-            border-left-color: #3b82f6; border-radius: 50%;
-            animation: spin 1s linear infinite; margin-bottom: 20px;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
+  </script>
+  <style>
+    html, body, #root { width: 100%; height: 100%; margin: 0; background: #0f172a; overflow: hidden; }
+    * { box-sizing: border-box; }
+    canvas { touch-action: none; }
+    .tap-target { min-width: 44px; min-height: 44px; }
+  </style>
 </head>
 <body>
-    <div id="loader">
-        <div class="spinner"></div>
-        <div id="loader-text" class="text-2xl font-bold tracking-wider">LOADING FUN...</div>
-        <div id="timeout-msg" style="display:none; margin-top:20px; color:#94a3b8; text-align:center;">
-            Taking a bit? <br>
-            <button onclick="document.getElementById('loader').style.display='none'" class="mt-4 px-6 py-3 bg-yellow-500 text-black rounded-xl font-bold hover:bg-yellow-400">PLAY NOW!</button>
-        </div>
-    </div>
-    <div id="root"></div>
+  <div id="root"></div>
 
-    <script>
-        window.onerror = function() { return false; }; // Suppress visible errors for kids
-        setTimeout(() => {
-            const msg = document.getElementById('timeout-msg');
-            if (msg) msg.style.display = 'block';
-        }, 3500);
-    </script>
+  <script type="text/babel" data-type="module">
+    import React, { useEffect, useMemo, useRef, useState, Suspense, useCallback } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { Canvas, useFrame, useThree } from '@react-three/fiber';
+    import { Environment, OrbitControls, RoundedBox } from '@react-three/drei';
+    import * as THREE from 'three';
+    import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
+    import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js';
 
-    <script type="text/babel" data-type="module">
-        import React, { useState, useEffect, Suspense, Component, useRef } from 'react';
-        import { createRoot } from 'react-dom/client';
-        import { Canvas, useThree } from '@react-three/fiber';
-        import { OrbitControls, RoundedBox, Environment, Html } from '@react-three/drei';
-        import { XR, Controllers, Hands, VRButton, useXR } from '@react-three/xr';
-        import * as THREE from 'three';
+    const STORAGE_KEY = 'lego-project-v2';
+    const ONBOARD_KEY = 'lego-onboard-seen-v2';
+    const GRID_SIZE = 50;
 
-        // --- Kid-Friendly Icons ---
-        const Icons = {
-            Hammer: () => <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 12-8.5 8.5c-.83.83-2.17.83-3 0 0 0 0 0 0 0a2.12 2.12 0 0 1 0-3L12 9"/><path d="M17.64 15 22 10.64"/><path d="m20.91 11.7-1.25-1.25c-.6-.6-.93-1.4-.93-2.25V3.67c0-.73.6-1.33 1.33-1.33s1.33.6 1.33 1.33V8.12c0 .5.53.88 1 .79C24 8.61 24 6.7 24 5.33"/><path d="m6.5 17.5 8.5-8.5"/></svg>,
-            Brick: () => <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" x2="12" y1="22.08" y2="12"/></svg>,
-            Rotate: () => <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>,
-            Library: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>,
-            Save: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
-            Camera: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>,
-            Bomb: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="13" r="9"/><path d="M14.35 4.65 16.3 2.7a2.41 2.41 0 0 1 3.4 0l1.6 1.6a2.4 2.4 0 0 1 0 3.4l-1.95 1.95"/><path d="m22 2-1.5 1.5"/></svg>
-        };
+    const PALETTE = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#a855f7', '#ec4899', '#f8fafc', '#334155'];
+    const BRICK_TYPES = [
+      { id: '1x1', w: 1, d: 1, label: '1x1' },
+      { id: '1x2', w: 1, d: 2, label: '1x2' },
+      { id: '2x2', w: 2, d: 2, label: '2x2' },
+      { id: '2x4', w: 2, d: 4, label: '2x4' }
+    ];
+    const BY_ID = Object.fromEntries(BRICK_TYPES.map((t) => [t.id, t]));
 
-        const GRID_SIZE = 20;
-        const generateId = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+    const id = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
-        // --- Audio System ---
-        const playSound = (type, enabled = true) => {
-            if (!enabled) return;
-            try {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                if (!AudioContext) return;
-                const ctx = new AudioContext();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                const now = ctx.currentTime;
-                
-                if (type === 'snap') {
-                    osc.type = 'sine';
-                    osc.frequency.setValueAtTime(600, now);
-                    osc.frequency.exponentialRampToValueAtTime(1000, now + 0.1);
-                    gain.gain.setValueAtTime(0.2, now);
-                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-                    osc.start(now); osc.stop(now + 0.1);
-                } else if (type === 'delete') {
-                    osc.type = 'sawtooth';
-                    osc.frequency.setValueAtTime(150, now);
-                    osc.frequency.linearRampToValueAtTime(50, now + 0.15);
-                    gain.gain.setValueAtTime(0.2, now);
-                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-                    osc.start(now); osc.stop(now + 0.15);
-                } else if (type === 'clear') {
-                    // Explosion sound
-                    osc.type = 'square';
-                    osc.frequency.setValueAtTime(100, now);
-                    osc.frequency.exponentialRampToValueAtTime(10, now + 0.5);
-                    gain.gain.setValueAtTime(0.5, now);
-                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-                    osc.start(now); osc.stop(now + 0.5);
-                }
-            } catch (e) {}
-        };
+    const normalizeRot = (r = 0) => ((Math.round(r / (Math.PI / 2)) % 4) + 4) % 4;
+    const dim = (type, rot) => {
+      const t = BY_ID[type] || BY_ID['1x1'];
+      return normalizeRot(rot) % 2 ? { w: t.d, d: t.w } : { w: t.w, d: t.d };
+    };
+    const cells = (b) => {
+      const { w, d } = dim(b.type, b.rotation);
+      const out = [];
+      for (let x = 0; x < w; x++) for (let z = 0; z < d; z++) out.push([b.position[0] + x, b.position[1], b.position[2] + z]);
+      return out;
+    };
 
-        // Bright, Kid-Friendly Colors
-        const PALETTE = [
-            { name: 'Red', hex: '#ef4444' }, 
-            { name: 'Orange', hex: '#f97316' }, 
-            { name: 'Yellow', hex: '#eab308' }, 
-            { name: 'Lime', hex: '#84cc16' },
-            { name: 'Green', hex: '#22c55e' }, 
-            { name: 'Cyan', hex: '#06b6d4' },
-            { name: 'Blue', hex: '#3b82f6' }, 
-            { name: 'Purple', hex: '#a855f7' },
-            { name: 'Pink', hex: '#ec4899' }, 
-            { name: 'White', hex: '#ffffff' },
-            { name: 'Black', hex: '#1e293b' },
-            { name: 'Brown', hex: '#78350f' },
-        ];
+    const canPlace = (all, candidate, ignoreId = null) => {
+      const occ = new Set();
+      all.forEach((b) => {
+        if (b.id === ignoreId) return;
+        cells(b).forEach(([x, y, z]) => occ.add(`${x},${y},${z}`));
+      });
+      return cells(candidate).every(([x, y, z]) => !occ.has(`${x},${y},${z}`));
+    };
 
-        const BRICK_TYPES = [
-            { id: '1x1', label: '1x1', width: 1, depth: 1, emoji: '🔹' },
-            { id: '1x2', label: '1x2', width: 1, depth: 2, emoji: '▬' },
-            { id: '2x2', label: '2x2', width: 2, depth: 2, emoji: '◼️' },
-            { id: '2x3', label: '2x3', width: 2, depth: 3, emoji: '▭' },
-            { id: '2x4', label: '2x4', width: 2, depth: 4, emoji: '🧱' },
-        ];
-        const BRICK_TYPES_BY_ID = Object.fromEntries(BRICK_TYPES.map(type => [type.id, type]));
+    const playMaterialSound = (type = 'plastic', volume = 0.06) => {
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        const ctx = new AC();
+        const now = ctx.currentTime;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        const noise = ctx.createBufferSource();
+        const b = ctx.createBuffer(1, ctx.sampleRate * 0.08, ctx.sampleRate);
+        const arr = b.getChannelData(0);
+        for (let i = 0; i < arr.length; i++) arr[i] = (Math.random() * 2 - 1) * 0.35;
+        noise.buffer = b;
 
-        // --- PRESETS ---
-        const createRect = (w, h, d, x, y, z, color) => {
-            const b = [];
-            for(let i=0; i<w; i++) for(let j=0; j<h; j++) for(let k=0; k<d; k++) 
-                b.push({ id: generateId(), position: [x+i, y+j, z+k], color, rotation: 0 });
-            return b;
-        };
+        const freqs = { plastic: 380, wood: 260, metal: 520 };
+        o.type = 'triangle';
+        o.frequency.setValueAtTime(freqs[type] || freqs.plastic, now);
+        g.gain.setValueAtTime(volume, now);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
 
-        const PRESETS = {
-            "Empty Grid": [],
-            "Cozy House": [
-                ...createRect(10, 1, 10, -5, 0, -5, '#22c55e'),
-                ...createRect(6, 3, 1, -3, 1, -3, '#f8fafc'),
-                ...createRect(6, 3, 1, -3, 1, 2, '#f8fafc'),
-                ...createRect(1, 3, 4, -3, 1, -2, '#f8fafc'),
-                ...createRect(1, 3, 4, 2, 1, -2, '#f8fafc'),
-                ...createRect(8, 1, 8, -4, 4, -4, '#ef4444'),
-                ...createRect(6, 1, 6, -3, 5, -3, '#ef4444'),
-            ],
-            "City Park": [
-                ...createRect(14, 1, 14, -7, 0, -7, '#22c55e'),
-                ...createRect(4, 1, 4, -6, 0, -6, '#3b82f6'),
-                ...createRect(1, 4, 1, 2, 1, 2, '#78350f'),
-                ...createRect(3, 2, 3, 1, 5, 1, '#22c55e'),
-            ],
-            "Mini Castle": [
-                ...createRect(8, 1, 8, -4, 0, -4, '#94a3b8'),
-                ...createRect(2, 5, 2, -4, 1, -4, '#64748b'),
-                ...createRect(2, 5, 2, 2, 1, -4, '#64748b'),
-                ...createRect(2, 5, 2, -4, 1, 2, '#64748b'),
-                ...createRect(2, 5, 2, 2, 1, 2, '#64748b'),
-                ...createRect(4, 2, 1, -2, 1, -4, '#94a3b8'),
-            ],
-            "Robot": [
-                ...createRect(2, 3, 1, -1, 0, 0, '#3b82f6'), // Legs
-                ...createRect(4, 3, 2, -2, 3, -0.5, '#ef4444'), // Body
-                ...createRect(2, 2, 2, -1, 6, -0.5, '#eab308'), // Head
-                ...createRect(1, 3, 1, -3, 3, 0, '#3b82f6'), // Arm L
-                ...createRect(1, 3, 1, 2, 3, 0, '#3b82f6'), // Arm R
-            ]
-        };
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 1800;
+        o.connect(g);
+        noise.connect(lp);
+        lp.connect(g);
+        g.connect(ctx.destination);
 
-        // --- 3D Components ---
-        const PlasticMaterial = ({ color, hover = false, highlight = false }) => (
-            <meshPhysicalMaterial
-                color={highlight ? '#ff0000' : color} // Red highlight on delete hover
-                emissive={highlight ? '#aa0000' : '#000000'}
-                roughness={0.2} 
-                metalness={0.1}
-                clearcoat={0.5} 
-                clearcoatRoughness={0.1} 
-                ior={1.5}
-                transparent={hover} 
-                opacity={hover ? 0.6 : 1}
+        o.start(now); o.stop(now + 0.12);
+        noise.start(now); noise.stop(now + 0.08);
+      } catch {}
+    };
+
+    function Brick({ brick, mode, onDelete, onPickMove, onHover, selected }) {
+      const { w, d } = dim(brick.type, brick.rotation);
+      return (
+        <group position={brick.position} rotation={[0, brick.rotation || 0, 0]}>
+          <RoundedBox
+            args={[w, Math.max(0.5, 1 - (brick.damage || 0) * 0.08), d]}
+            radius={0.05}
+            smoothness={3}
+            position={[(w - 1) / 2, 0.5, (d - 1) / 2]}
+            castShadow
+            receiveShadow
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              if (mode === 'delete') onDelete(brick.id);
+              if (mode === 'move') onPickMove(brick.id);
+            }}
+            onPointerMove={(e) => {
+              e.stopPropagation();
+              onHover(e);
+            }}
+          >
+            <meshStandardMaterial
+              color={selected ? '#facc15' : brick.color}
+              roughness={0.45}
+              metalness={0.12 + (brick.material === 'metal' ? 0.2 : 0)}
             />
-        );
+          </RoundedBox>
+        </group>
+      );
+    }
 
-        const normalizeRotation = (rotation = 0) => {
-            const quarterTurns = Math.round(rotation / (Math.PI / 2));
-            return ((quarterTurns % 4) + 4) % 4;
-        };
+    function Scene({ state, setHoverPos, hoverPos, setSnapshotBricks, requestCapture, clearCapture, selectedId, setSelectedId }) {
+      const { scene, camera, gl } = useThree();
+      const punchVelRef = useRef({});
 
-        const getBrickDimensions = (typeId = '1x1', rotation = 0) => {
-            const type = BRICK_TYPES_BY_ID[typeId] || BRICK_TYPES_BY_ID['1x1'];
-            const quarterTurns = normalizeRotation(rotation);
-            const swap = quarterTurns % 2 === 1;
-            return { width: swap ? type.depth : type.width, depth: swap ? type.width : type.depth };
-        };
+      useFrame((_, dt) => {
+        state.bricks.forEach((b) => {
+          if (!punchVelRef.current[b.id]) return;
+          const v = punchVelRef.current[b.id];
+          b.position[0] += v.x * dt;
+          b.position[1] = Math.max(0, b.position[1] + v.y * dt);
+          b.position[2] += v.z * dt;
+          v.x *= 0.92; v.y *= 0.86; v.z *= 0.92;
+          if (Math.abs(v.x) + Math.abs(v.y) + Math.abs(v.z) < 0.02) delete punchVelRef.current[b.id];
+        });
+      });
 
-        const getBrickCells = (brick) => {
-            const { width, depth } = getBrickDimensions(brick.type, brick.rotation);
-            const cells = [];
-            for (let x = 0; x < width; x++) {
-                for (let z = 0; z < depth; z++) {
-                    cells.push([brick.position[0] + x, brick.position[1], brick.position[2] + z]);
-                }
-            }
-            return cells;
-        };
+      useEffect(() => {
+        if (!requestCapture) return;
+        const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+        const size = new THREE.Vector2();
+        gl.getSize(size);
+        const w = Math.floor(size.x * dpr);
+        const h = Math.floor(size.y * dpr);
 
-        const canPlaceBrick = (allBricks, candidateBrick) => {
-            const occupied = new Set();
-            allBricks.forEach((brick) => {
-                getBrickCells(brick).forEach(([x, y, z]) => occupied.add(`${x},${y},${z}`));
-            });
-            return getBrickCells(candidateBrick).every(([x, y, z]) => !occupied.has(`${x},${y},${z}`));
-        };
+        const target = new THREE.WebGLRenderTarget(w, h, { format: THREE.RGBAFormat });
+        const prev = gl.getRenderTarget();
+        gl.setRenderTarget(target);
+        gl.render(scene, camera);
 
-        const BrickVisual = ({ brickType = '1x1', rotation = 0, color, transparent = false, highlight = false, onPointerDown, onPointerOver, onPointerOut, onPointerMove }) => {
-            const { width, depth } = getBrickDimensions(brickType, rotation);
-            const studs = [];
-            for (let x = 0; x < width; x++) {
-                for (let z = 0; z < depth; z++) {
-                    studs.push([x, z]);
-                }
-            }
+        const buf = new Uint8Array(w * h * 4);
+        gl.readRenderTargetPixels(target, 0, 0, w, h, buf);
+        gl.setRenderTarget(prev);
+        target.dispose();
 
-            return (
-                <group>
-                    <RoundedBox
-                        args={[width, 1, depth]} radius={0.05} smoothness={4} position={[(width - 1) / 2, 0.5, (depth - 1) / 2]}
-                        castShadow receiveShadow
-                        onPointerDown={onPointerDown}
-                        onPointerOver={onPointerOver}
-                        onPointerOut={onPointerOut}
-                        onPointerMove={onPointerMove}
-                    >
-                        <PlasticMaterial color={color} hover={transparent} highlight={highlight} />
-                    </RoundedBox>
-                    {studs.map(([x, z]) => (
-                        <mesh key={`${x}-${z}`} position={[x, 1.1, z]} castShadow receiveShadow>
-                            <cylinderGeometry args={[0.3, 0.3, 0.2, 20]} />
-                            <PlasticMaterial color={color} hover={transparent} highlight={highlight} />
-                        </mesh>
-                    ))}
-                </group>
-            );
-        };
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        const img = ctx.createImageData(w, h);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const src = ((h - y - 1) * w + x) * 4;
+            const dst = (y * w + x) * 4;
+            img.data[dst] = buf[src];
+            img.data[dst + 1] = buf[src + 1];
+            img.data[dst + 2] = buf[src + 2];
+            img.data[dst + 3] = 255;
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/png');
+        a.download = 'lego-screenshot.png';
+        a.click();
+        clearCapture();
+      }, [requestCapture]);
 
-        const Brick = ({ position, rotation, color, type, onClick, onPointerMove, transparent = false, deleteMode, setHoveredBrick, id }) => (
-            <group position={position}>
-                <BrickVisual
-                    brickType={type}
-                    rotation={rotation}
-                    color={color}
-                    transparent={transparent}
-                    onPointerDown={(e) => { if(onClick) { e.stopPropagation(); onClick(e); } }}
-                    onPointerMove={(e) => { if(onPointerMove) { e.stopPropagation(); onPointerMove(e); } }}
-                    onPointerOver={(e) => { if(deleteMode) { e.stopPropagation(); setHoveredBrick(id); } }}
-                    onPointerOut={() => { if(deleteMode) { setHoveredBrick(null); } }}
-                />
+      const pointerToGrid = (e) => {
+        const p = e.point;
+        if (e.object.geometry?.type === 'PlaneGeometry') return [Math.round(p.x), 0, Math.round(p.z)];
+        const n = e.face?.normal || new THREE.Vector3();
+        const out = [Math.round(p.x + n.x * 0.5), Math.max(0, Math.floor(p.y + n.y * 0.5)), Math.round(p.z + n.z * 0.5)];
+        return out;
+      };
+
+      const punchAll = () => {
+        const dir = new THREE.Vector3();
+        camera.getWorldDirection(dir);
+        const base = dir.multiplyScalar(-6);
+        const next = state.bricks.map((b) => ({ ...b, damage: Math.min(8, (b.damage || 0) + 1) }));
+        next.forEach((b) => {
+          punchVelRef.current[b.id] = {
+            x: base.x + (Math.random() - 0.5) * 4,
+            y: 2 + Math.random() * 3,
+            z: base.z + (Math.random() - 0.5) * 4
+          };
+        });
+        setSnapshotBricks(next, 'metal');
+      };
+      state.punchRef.current = punchAll;
+
+      return (
+        <>
+          <ambientLight intensity={0.65} />
+          <directionalLight position={[8, 14, 8]} castShadow intensity={1.1} />
+          <Suspense fallback={null}><Environment preset="park" /></Suspense>
+
+          {state.bricks.map((brick) => (
+            <Brick
+              key={brick.id}
+              brick={brick}
+              mode={state.mode}
+              selected={selectedId === brick.id}
+              onDelete={(id) => {
+                setSelectedId(null);
+                setSnapshotBricks(state.bricks.filter((b) => b.id !== id), 'wood');
+              }}
+              onPickMove={(id) => setSelectedId(id)}
+              onHover={(e) => setHoverPos(pointerToGrid(e))}
+            />
+          ))}
+
+          {state.mode === 'build' && hoverPos && (
+            <group position={hoverPos}>
+              <RoundedBox args={[dim(state.type, state.rotation).w, 1, dim(state.type, state.rotation).d]} radius={0.05} smoothness={3} position={[(dim(state.type, state.rotation).w - 1) / 2, 0.5, (dim(state.type, state.rotation).d - 1) / 2]}>
+                <meshStandardMaterial color={state.color} opacity={0.45} transparent />
+              </RoundedBox>
             </group>
-        );
+          )}
 
-        const InteractiveBrick = ({ id, hoveredBrickId, deleteMode, ...props }) => {
-            const isHighlighted = deleteMode && hoveredBrickId === id;
-            return (
-                <group position={props.position}>
-                    <BrickVisual
-                        brickType={props.type}
-                        rotation={props.rotation}
-                        color={props.color}
-                        highlight={isHighlighted}
-                        onPointerDown={(e) => { e.stopPropagation(); props.onClick(e); }}
-                        onPointerOver={(e) => { if(deleteMode) { e.stopPropagation(); props.setHoveredBrick(id); } }}
-                        onPointerOut={() => { if(deleteMode) { props.setHoveredBrick(null); } }}
-                        onPointerMove={(e) => { e.stopPropagation(); props.onPointerMove(e); }}
-                    />
-                </group>
-            );
+          <mesh
+            rotation={[-Math.PI / 2, 0, 0]}
+            position={[0, -0.01, 0]}
+            onPointerMove={(e) => setHoverPos(pointerToGrid(e))}
+            onPointerDown={(e) => {
+              if (!hoverPos) return;
+              if (state.mode === 'build') {
+                const c = { id: id(), position: hoverPos, color: state.color, rotation: state.rotation, type: state.type, material: 'plastic', damage: 0 };
+                if (canPlace(state.bricks, c)) setSnapshotBricks([...state.bricks, c], 'plastic');
+              }
+              if (state.mode === 'move' && selectedId) {
+                const src = state.bricks.find((b) => b.id === selectedId);
+                if (!src) return;
+                const moved = { ...src, position: hoverPos };
+                if (canPlace(state.bricks, moved, src.id)) {
+                  setSnapshotBricks(state.bricks.map((b) => (b.id === selectedId ? moved : b)), 'plastic');
+                }
+                setSelectedId(null);
+              }
+            }}
+          >
+            <planeGeometry args={[GRID_SIZE, GRID_SIZE]} />
+            <meshStandardMaterial transparent opacity={0} />
+          </mesh>
+
+          <gridHelper args={[GRID_SIZE, GRID_SIZE, 0x64748b, 0x334155]} position={[0, 0.01, 0]} />
+          <OrbitControls makeDefault minDistance={4} maxDistance={50} minPolarAngle={0.05} maxPolarAngle={Math.PI / 2 - 0.05} />
+        </>
+      );
+    }
+
+    function App() {
+      const [bricks, setBricks] = useState([]);
+      const [history, setHistory] = useState([[]]);
+      const [historyIndex, setHistoryIndex] = useState(0);
+      const [hoverPos, setHoverPos] = useState(null);
+      const [mode, setMode] = useState('build');
+      const [color, setColor] = useState(PALETTE[0]);
+      const [type, setType] = useState(BRICK_TYPES[0].id);
+      const [rotation, setRotation] = useState(0);
+      const [selectedId, setSelectedId] = useState(null);
+      const [capture, setCapture] = useState(false);
+      const [showOnboard, setShowOnboard] = useState(false);
+      const punchRef = useRef(() => {});
+
+      useEffect(() => {
+        const seen = localStorage.getItem(ONBOARD_KEY);
+        if (!seen) setShowOnboard(true);
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed.bricks)) {
+              setBricks(parsed.bricks);
+              setHistory([parsed.bricks]);
+              setHistoryIndex(0);
+            }
+          } catch {}
         }
+      }, []);
 
-        const LightingEnvironment = ({ isDark }) => {
-            return <Environment preset={isDark ? "city" : "park"} blur={0.8} />;
-        };
+      const setSnapshotBricks = useCallback((next, soundType = 'plastic') => {
+        setBricks(next);
+        setHistory((prev) => {
+          const trimmed = prev.slice(0, historyIndex + 1);
+          return [...trimmed, JSON.parse(JSON.stringify(next))];
+        });
+        setHistoryIndex((i) => i + 1);
+        playMaterialSound(soundType, 0.05);
+      }, [historyIndex]);
 
-        const SceneContent = ({ 
-            bricks, hoverPos, activeColor, rotation,
-            activeBrickType,
-            addBrick, removeBrick, setHoverPos,
-            mode, showGrid, isDark, 
-            soundEnabled, screenshotTrigger, onScreenshotTaken,
-            hoveredBrickId, setHoveredBrick
-        }) => {
-            const { gl, scene, camera } = useThree();
+      const undo = () => {
+        if (historyIndex <= 0) return;
+        const nextIndex = historyIndex - 1;
+        setHistoryIndex(nextIndex);
+        setBricks(JSON.parse(JSON.stringify(history[nextIndex])));
+      };
 
-            useEffect(() => {
-                if (screenshotTrigger) {
-                    gl.render(scene, camera);
-                    const dataUrl = gl.domElement.toDataURL('image/png');
-                    const link = document.createElement('a');
-                    link.setAttribute('download', 'my-lego-build.png');
-                    link.setAttribute('href', dataUrl);
-                    link.click();
-                    onScreenshotTaken();
-                }
-            }, [screenshotTrigger]);
-            
-            const handlePointerMove = (e) => {
-                e.stopPropagation();
-                if (mode === 'delete') { setHoverPos(null); return; }
-                const pt = e.point;
-                let pos = [0, 0, 0];
-                if (e.object.geometry.type === 'PlaneGeometry') {
-                    pos = [Math.round(pt.x), 0, Math.round(pt.z)];
-                } else {
-                    const n = e.face.normal;
-                    pos = [Math.round(pt.x + n.x * 0.5), Math.floor(pt.y + n.y * 0.5), Math.round(pt.z + n.z * 0.5)];
-                    if (pos[1] < 0) pos[1] = 0;
-                }
-                setHoverPos(prev => (!prev || prev[0]!==pos[0] || prev[1]!==pos[1] || prev[2]!==pos[2]) ? pos : prev);
-            };
+      const redo = () => {
+        if (historyIndex >= history.length - 1) return;
+        const nextIndex = historyIndex + 1;
+        setHistoryIndex(nextIndex);
+        setBricks(JSON.parse(JSON.stringify(history[nextIndex])));
+      };
 
-            const handleClick = (e) => {
-                e.stopPropagation();
-                if (mode === 'delete') return; // Handled by brick onClick
-                if (hoverPos) {
-                    const candidateBrick = { position: hoverPos, color: activeColor, rotation, type: activeBrickType };
-                    if (canPlaceBrick(bricks, candidateBrick)) addBrick(candidateBrick);
-                }
-            };
+      const saveProject = () => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ bricks, savedAt: new Date().toISOString() }));
+      };
 
-            return (
-                <>
-                    <ambientLight intensity={isDark ? 0.3 : 0.7} />
-                    <directionalLight position={[10, 20, 10]} intensity={isDark ? 0.8 : 1.5} castShadow shadow-mapSize={[1024, 1024]}>
-                        <orthographicCamera attach="shadow-camera" args={[-20, 20, 20, -20]} />
-                    </directionalLight>
+      const reloadProject = () => {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed.bricks)) {
+            setBricks(parsed.bricks);
+            setHistory([parsed.bricks]);
+            setHistoryIndex(0);
+          }
+        } catch {}
+      };
 
-                    {/* Controllers for VR */}
-                    <Controllers />
-                    <Hands />
+      const exportModel = (format) => {
+        const root = new THREE.Group();
+        bricks.forEach((b) => {
+          const { w, d } = dim(b.type, b.rotation);
+          const g = new THREE.BoxGeometry(w, 1, d);
+          g.translate((w - 1) / 2, 0.5, (d - 1) / 2);
+          const m = new THREE.MeshStandardMaterial({ color: new THREE.Color(b.color) });
+          const mesh = new THREE.Mesh(g, m);
+          mesh.position.set(b.position[0], b.position[1], b.position[2]);
+          mesh.rotation.y = b.rotation || 0;
+          mesh.updateMatrixWorld(true);
+          root.add(mesh);
+        });
 
-                    <group>
-                        {bricks.map((brick) => (
-                            <InteractiveBrick
-                                key={brick.id}
-                                id={brick.id}
-                                position={brick.position}
-                                rotation={brick.rotation}
-                                type={brick.type || '1x1'}
-                                color={brick.color}
-                                deleteMode={mode === 'delete'}
-                                hoveredBrickId={hoveredBrickId}
-                                setHoveredBrick={setHoveredBrick}
-                                onClick={(e) => {
-                                    if (mode === 'delete') removeBrick(brick.id);
-                                    else { handlePointerMove(e); handleClick(e); }
-                                }}
-                                onPointerMove={handlePointerMove}
-                            />
-                        ))}
-                        
-                        {mode === 'build' && hoverPos && (
-                            <Brick position={hoverPos} rotation={rotation} type={activeBrickType} color={activeColor} transparent={true} />
-                        )}
+        let text = '';
+        let blobType = 'text/plain';
+        let file = 'lego-model';
+        if (format === 'stl') {
+          text = new STLExporter().parse(root, { binary: false });
+          file += '.stl';
+        } else {
+          text = new OBJExporter().parse(root);
+          file += '.obj';
+        }
+        const blob = new Blob([text], { type: blobType });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = file;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      };
 
-                        <mesh rotation={[-Math.PI/2, 0, 0]} position={[0, -0.01, 0]} receiveShadow onPointerMove={handlePointerMove} onClick={handleClick}>
-                            <planeGeometry args={[50, 50]} />
-                            <meshStandardMaterial transparent opacity={0} />
-                        </mesh>
-                        
-                        {showGrid && (
-                            <gridHelper args={[GRID_SIZE * 2, GRID_SIZE * 2, isDark ? 0x555555 : 0x888888, isDark ? 0x222222 : 0xe5e7eb]} position={[0, 0.01, 0]} />
-                        )}
-                    </group>
+      const state = useMemo(() => ({ bricks, mode, color, type, rotation, punchRef }), [bricks, mode, color, type, rotation]);
 
-                    <OrbitControls makeDefault minPolarAngle={0} maxPolarAngle={Math.PI / 2 - 0.1} dampingFactor={0.05} enableDamping />
-                </>
-            );
-        };
-
-        // --- Kid-Friendly UI Components ---
-        const BigButton = ({ icon: Icon, onClick, active, label, color, red }) => (
-            <button 
-                onClick={onClick} 
-                className={`
-                    relative flex flex-col items-center justify-center w-20 h-20 rounded-2xl transition-all duration-200 btn-pop btn-press shadow-xl border-4
-                    ${active 
-                        ? (red ? 'bg-red-500 border-red-700 text-white scale-110' : 'bg-green-500 border-green-700 text-white scale-110')
-                        : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
-                    }
-                `}
-                title={label}
-            >
-                <Icon />
-                <span className="text-[10px] font-black mt-1 uppercase tracking-wider">{label}</span>
-                {active && <div className="absolute -top-2 -right-2 w-6 h-6 bg-yellow-400 rounded-full flex items-center justify-center text-xs border-2 border-white">✨</div>}
-            </button>
-        );
-
-        const ColorButton = ({ color, active, onClick }) => (
-            <button
-                onClick={onClick}
-                className={`
-                    w-12 h-12 rounded-xl border-4 transition-transform duration-200 shadow-md flex-shrink-0
-                    ${active ? 'border-black scale-110 ring-2 ring-white' : 'border-white/50 hover:scale-105'}
-                `}
-                style={{ backgroundColor: color }}
+      return (
+        <div className="w-full h-full relative overflow-hidden text-slate-100">
+          <Canvas camera={{ position: [8, 8, 10], fov: 45 }} dpr={[1, 2]} shadows>
+            <Scene
+              state={state}
+              hoverPos={hoverPos}
+              setHoverPos={setHoverPos}
+              setSnapshotBricks={setSnapshotBricks}
+              requestCapture={capture}
+              clearCapture={() => setCapture(false)}
+              selectedId={selectedId}
+              setSelectedId={setSelectedId}
             />
-        );
+          </Canvas>
 
-        function App() {
-            const [bricks, setBricks] = useState([]);
-            const [hoveredBrickId, setHoveredBrickId] = useState(null);
-            const [history, setHistory] = useState([[]]);
-            const [hoverPos, setHoverPos] = useState(null);
-            const [activeColor, setActiveColor] = useState(PALETTE[0].hex);
-            const [activeBrickType, setActiveBrickType] = useState(BRICK_TYPES[0].id);
-            const [rotation, setRotation] = useState(0);
-            const [mode, setMode] = useState('build');
-            const [showGrid, setShowGrid] = useState(true);
-            const [isDark, setIsDark] = useState(false);
-            const [soundEnabled, setSoundEnabled] = useState(true);
-            const [screenshotTrigger, setScreenshotTrigger] = useState(false);
-            const [showLibrary, setShowLibrary] = useState(false);
-            const fileInputRef = useRef(null);
+          <div className="absolute inset-x-0 top-0 p-2 sm:p-3 z-10 pointer-events-none">
+            <div className="pointer-events-auto bg-slate-900/75 rounded-2xl p-2 flex flex-wrap gap-2 items-center justify-center md:justify-between backdrop-blur">
+              <div className="flex flex-wrap gap-2 justify-center">
+                {['build', 'move', 'delete'].map((m) => (
+                  <button key={m} className={`tap-target px-3 py-2 rounded-xl text-sm font-bold ${mode === m ? 'bg-blue-500' : 'bg-slate-700'}`} onClick={() => setMode(m)}>{m.toUpperCase()}</button>
+                ))}
+                <button className="tap-target px-3 py-2 rounded-xl bg-slate-700" onClick={() => setRotation((r) => r + Math.PI / 2)}>Rotate</button>
+                <button className="tap-target px-3 py-2 rounded-xl bg-orange-600" onClick={() => punchRef.current()}>Punch All</button>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center">
+                <button className="tap-target px-3 py-2 rounded-xl bg-slate-700" onClick={undo}>Undo</button>
+                <button className="tap-target px-3 py-2 rounded-xl bg-slate-700" onClick={redo}>Redo</button>
+                <button className="tap-target px-3 py-2 rounded-xl bg-slate-700" onClick={saveProject}>Save</button>
+                <button className="tap-target px-3 py-2 rounded-xl bg-slate-700" onClick={reloadProject}>Reload</button>
+                <button className="tap-target px-3 py-2 rounded-xl bg-slate-700" onClick={() => exportModel('stl')}>Export STL</button>
+                <button className="tap-target px-3 py-2 rounded-xl bg-slate-700" onClick={() => exportModel('obj')}>Export OBJ</button>
+                <button className="tap-target px-3 py-2 rounded-xl bg-emerald-700" onClick={() => setCapture(true)}>Export Screenshot</button>
+              </div>
+            </div>
+          </div>
 
-            useEffect(() => {
-                const loader = document.getElementById('loader');
-                if(loader) {
-                    setTimeout(() => loader.style.display = 'none', 1000);
-                }
-            }, []);
+          <div className="absolute inset-x-0 bottom-0 p-2 sm:p-3 z-10 pointer-events-none">
+            <div className="pointer-events-auto bg-slate-900/75 rounded-2xl p-2 flex flex-col gap-2 backdrop-blur max-w-full">
+              <div className="flex flex-wrap gap-2 justify-center">
+                {BRICK_TYPES.map((t) => (
+                  <button key={t.id} className={`tap-target px-3 py-2 rounded-xl border ${type === t.id ? 'bg-cyan-500 border-cyan-300' : 'bg-slate-700 border-slate-500'}`} onClick={() => setType(t.id)}>{t.label}</button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {PALETTE.map((c) => (
+                  <button key={c} className={`tap-target w-11 h-11 rounded-xl border-2 ${color === c ? 'border-white scale-110' : 'border-transparent'}`} style={{ background: c }} onClick={() => setColor(c)} aria-label={c} />
+                ))}
+              </div>
+            </div>
+          </div>
 
-            const addBrick = (d) => { 
-                const n = [...bricks, { ...d, type: d.type || '1x1', id: generateId() }]; 
-                setBricks(n); 
-                playSound('snap', soundEnabled);
-            };
-            const removeBrick = (id) => { 
-                const n = bricks.filter(b => b.id !== id); 
-                setBricks(n); 
-                setHoveredBrickId(null);
-                playSound('delete', soundEnabled);
-            };
-            
-            const loadPreset = (name) => {
-                const presetData = PRESETS[name];
-                if (presetData) {
-                    // Force a new array reference
-                    const newBricks = presetData.map(b => ({ ...b, type: b.type || '1x1', id: generateId() }));
-                    setBricks([...newBricks]); 
-                    setShowLibrary(false);
-                    if (name === "Empty Grid") playSound('clear', soundEnabled);
-                    else playSound('snap', soundEnabled);
-                }
-            };
-            
-            const saveBuild = () => { try { localStorage.setItem('lego-build', JSON.stringify(bricks)); alert('Saved!'); } catch(e){} };
-            
-            const exportBuild = () => {
-                const a = document.createElement('a');
-                a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bricks));
-                a.download = `my-build.json`; document.body.appendChild(a); a.click(); a.remove();
-            };
-            
-            const importBuild = (e) => {
-                const f = e.target.files[0]; if(!f) return;
-                const r = new FileReader();
-                r.onload = (ev) => { 
-                    try { 
-                        const p = JSON.parse(ev.target.result); 
-                        if(Array.isArray(p)) { setBricks(p.map(b => ({ ...b, type: b.type || '1x1' }))); } 
-                    } catch(err){} 
-                };
-                r.readAsText(f); e.target.value = '';
-            };
+          {showOnboard && (
+            <div className="absolute inset-0 z-20 bg-slate-950/80 flex items-center justify-center p-4">
+              <div className="max-w-md w-full bg-white text-slate-900 rounded-3xl p-5">
+                <h1 className="text-2xl font-extrabold">Start Building</h1>
+                <ul className="mt-3 text-sm space-y-2">
+                  <li>👉 Tap the ground to place a brick.</li>
+                  <li>✋ Choose Move mode, tap brick, tap ground to move.</li>
+                  <li>🧨 Punch All for quick physics fun.</li>
+                </ul>
+                <button
+                  className="mt-4 w-full tap-target py-3 rounded-2xl bg-blue-600 text-white font-bold"
+                  onClick={() => {
+                    localStorage.setItem(ONBOARD_KEY, '1');
+                    setShowOnboard(false);
+                  }}
+                >
+                  Start Building
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
 
-            return (
-                <div className={`w-full h-screen relative select-none touch-none overflow-hidden transition-colors duration-500 ${isDark ? 'bg-slate-900' : 'bg-blue-100'}`}>
-                    <input type="file" ref={fileInputRef} onChange={importBuild} accept=".json" style={{display: 'none'}} />
-                    
-                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
-                        <VRButton className="bg-black text-white px-6 py-3 rounded-full font-bold shadow-xl border-2 border-white/20 hover:scale-105 transition-transform" />
-                    </div>
-
-                    <Canvas 
-                        shadows 
-                        dpr={[1, 1.5]} 
-                        gl={{ preserveDrawingBuffer: true }}
-                        camera={{ position: [8, 8, 8], fov: 45 }}
-                    >
-                        <XR>
-                            <SceneContent
-                                bricks={bricks} hoverPos={hoverPos} setHoverPos={setHoverPos}
-                                activeColor={activeColor} rotation={rotation}
-                                activeBrickType={activeBrickType}
-                                addBrick={addBrick} removeBrick={removeBrick}
-                                mode={mode} showGrid={showGrid} isDark={isDark}
-                                setRotation={setRotation} saveBuild={saveBuild}
-                                soundEnabled={soundEnabled}
-                                screenshotTrigger={screenshotTrigger}
-                                onScreenshotTaken={() => setScreenshotTrigger(false)}
-                                hoveredBrickId={hoveredBrickId}
-                                setHoveredBrick={setHoveredBrickId}
-                            />
-                            <Suspense fallback={null}>
-                                <LightingEnvironment isDark={isDark} />
-                            </Suspense>
-                        </XR>
-                    </Canvas>
-                    
-                    {/* Top Bar (Tools) */}
-                    <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-start pointer-events-none z-10">
-                        <div className="pointer-events-auto bg-white/90 backdrop-blur rounded-2xl p-2 shadow-lg flex gap-2">
-                            <button onClick={() => setShowLibrary(!showLibrary)} className="p-2 hover:bg-blue-50 rounded-xl text-blue-600 font-bold flex flex-col items-center">
-                                <Icons.Library /> <span className="text-[10px]">LIBRARY</span>
-                            </button>
-                            <button onClick={() => setScreenshotTrigger(true)} className="p-2 hover:bg-blue-50 rounded-xl text-slate-600 flex flex-col items-center">
-                                <Icons.Camera /> <span className="text-[10px]">PHOTO</span>
-                            </button>
-                            <button onClick={saveBuild} className="p-2 hover:bg-blue-50 rounded-xl text-slate-600 flex flex-col items-center">
-                                <Icons.Save /> <span className="text-[10px]">SAVE</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Library Modal */}
-                    {showLibrary && (
-                        <div className="absolute inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setShowLibrary(false)}>
-                            <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-                                <div className="flex justify-between items-center mb-4">
-                                    <h2 className="text-2xl font-black text-slate-800">📖 Fun Templates</h2>
-                                    <button onClick={() => setShowLibrary(false)} className="text-4xl hover:scale-110 transition">❌</button>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto p-1">
-                                    {Object.keys(PRESETS).map(name => (
-                                        <button 
-                                            key={name} 
-                                            onClick={() => loadPreset(name)}
-                                            className={`
-                                                p-4 rounded-xl text-left transition-all border-b-4 active:border-b-0 active:translate-y-1
-                                                ${name === "Empty Grid" 
-                                                    ? 'bg-red-100 hover:bg-red-200 border-red-300 text-red-700' 
-                                                    : 'bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-800'}
-                                            `}
-                                        >
-                                            <div className="text-2xl mb-1">{name === "Empty Grid" ? "💣" : "🏗️"}</div>
-                                            <div className="font-bold">{name === "Empty Grid" ? "Clear All" : name}</div>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Bottom Controls (Kids UI) */}
-                    <div className="absolute bottom-6 left-4 right-4 flex flex-col items-center gap-4 pointer-events-none z-10">
-                        {/* Palette */}
-                        <div className="pointer-events-auto bg-white/90 backdrop-blur-md p-3 rounded-2xl shadow-xl flex gap-3 overflow-x-auto max-w-full w-auto no-scrollbar border-2 border-white/50">
-                            {PALETTE.map(c => (
-                                <ColorButton key={c.hex} color={c.hex} active={activeColor === c.hex} onClick={() => setActiveColor(c.hex)} />
-                            ))}
-                        </div>
-
-                        <div className="pointer-events-auto bg-white/90 backdrop-blur-md p-3 rounded-2xl shadow-xl flex gap-2 overflow-x-auto max-w-full w-auto no-scrollbar border-2 border-white/50">
-                            {BRICK_TYPES.map(type => (
-                                <button
-                                    key={type.id}
-                                    onClick={() => setActiveBrickType(type.id)}
-                                    className={`min-w-[72px] px-3 py-2 rounded-xl border-2 font-black transition-all ${activeBrickType === type.id ? 'bg-blue-500 text-white border-blue-700 scale-105' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
-                                    title={`${type.label} brick`}
-                                >
-                                    <div className="text-lg leading-none">{type.emoji}</div>
-                                    <div className="text-xs mt-1">{type.label}</div>
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Big Action Buttons */}
-                        <div className="flex items-end justify-center gap-6 pointer-events-auto pb-2">
-                            <BigButton 
-                                icon={Icons.Brick} 
-                                label="BUILD" 
-                                active={mode === 'build'} 
-                                onClick={() => setMode('build')} 
-                            />
-                            
-                            <BigButton 
-                                icon={Icons.Hammer} 
-                                label="BREAK" 
-                                active={mode === 'delete'} 
-                                red={true}
-                                onClick={() => setMode('delete')} 
-                            />
-                            
-                            <button 
-                                onClick={() => setRotation(r => r + Math.PI/2)}
-                                className="w-16 h-16 bg-blue-500 text-white rounded-full shadow-lg border-b-4 border-blue-700 active:border-b-0 active:translate-y-1 flex items-center justify-center hover:bg-blue-400 transition-all"
-                                title="Spin Brick"
-                            >
-                                <Icons.Rotate />
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-
-        createRoot(document.getElementById('root')).render(<App />);
-    </script>
+    createRoot(document.getElementById('root')).render(<App />);
+  </script>
 </body>
 </html>
