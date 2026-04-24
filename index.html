@@ -150,6 +150,15 @@
             { name: 'Brown', hex: '#78350f' },
         ];
 
+        const BRICK_TYPES = [
+            { id: '1x1', label: '1x1', width: 1, depth: 1, emoji: '🔹' },
+            { id: '1x2', label: '1x2', width: 1, depth: 2, emoji: '▬' },
+            { id: '2x2', label: '2x2', width: 2, depth: 2, emoji: '◼️' },
+            { id: '2x3', label: '2x3', width: 2, depth: 3, emoji: '▭' },
+            { id: '2x4', label: '2x4', width: 2, depth: 4, emoji: '🧱' },
+        ];
+        const BRICK_TYPES_BY_ID = Object.fromEntries(BRICK_TYPES.map(type => [type.id, type]));
+
         // --- PRESETS ---
         const createRect = (w, h, d, x, y, z, color) => {
             const b = [];
@@ -207,51 +216,97 @@
             />
         );
 
-        const Brick = ({ position, rotation, color, onClick, onPointerMove, transparent = false, deleteMode, setHoveredBrick, id }) => (
-            <group position={position} rotation={[0, rotation, 0]}>
-                <RoundedBox 
-                    args={[1, 1, 1]} radius={0.05} smoothness={4} position={[0, 0.5, 0]} 
-                    castShadow receiveShadow
+        const normalizeRotation = (rotation = 0) => {
+            const quarterTurns = Math.round(rotation / (Math.PI / 2));
+            return ((quarterTurns % 4) + 4) % 4;
+        };
+
+        const getBrickDimensions = (typeId = '1x1', rotation = 0) => {
+            const type = BRICK_TYPES_BY_ID[typeId] || BRICK_TYPES_BY_ID['1x1'];
+            const quarterTurns = normalizeRotation(rotation);
+            const swap = quarterTurns % 2 === 1;
+            return { width: swap ? type.depth : type.width, depth: swap ? type.width : type.depth };
+        };
+
+        const getBrickCells = (brick) => {
+            const { width, depth } = getBrickDimensions(brick.type, brick.rotation);
+            const cells = [];
+            for (let x = 0; x < width; x++) {
+                for (let z = 0; z < depth; z++) {
+                    cells.push([brick.position[0] + x, brick.position[1], brick.position[2] + z]);
+                }
+            }
+            return cells;
+        };
+
+        const canPlaceBrick = (allBricks, candidateBrick) => {
+            const occupied = new Set();
+            allBricks.forEach((brick) => {
+                getBrickCells(brick).forEach(([x, y, z]) => occupied.add(`${x},${y},${z}`));
+            });
+            return getBrickCells(candidateBrick).every(([x, y, z]) => !occupied.has(`${x},${y},${z}`));
+        };
+
+        const BrickVisual = ({ brickType = '1x1', rotation = 0, color, transparent = false, highlight = false, onPointerDown, onPointerOver, onPointerOut, onPointerMove }) => {
+            const { width, depth } = getBrickDimensions(brickType, rotation);
+            const studs = [];
+            for (let x = 0; x < width; x++) {
+                for (let z = 0; z < depth; z++) {
+                    studs.push([x, z]);
+                }
+            }
+
+            return (
+                <group>
+                    <RoundedBox
+                        args={[width, 1, depth]} radius={0.05} smoothness={4} position={[(width - 1) / 2, 0.5, (depth - 1) / 2]}
+                        castShadow receiveShadow
+                        onPointerDown={onPointerDown}
+                        onPointerOver={onPointerOver}
+                        onPointerOut={onPointerOut}
+                        onPointerMove={onPointerMove}
+                    >
+                        <PlasticMaterial color={color} hover={transparent} highlight={highlight} />
+                    </RoundedBox>
+                    {studs.map(([x, z]) => (
+                        <mesh key={`${x}-${z}`} position={[x, 1.1, z]} castShadow receiveShadow>
+                            <cylinderGeometry args={[0.3, 0.3, 0.2, 20]} />
+                            <PlasticMaterial color={color} hover={transparent} highlight={highlight} />
+                        </mesh>
+                    ))}
+                </group>
+            );
+        };
+
+        const Brick = ({ position, rotation, color, type, onClick, onPointerMove, transparent = false, deleteMode, setHoveredBrick, id }) => (
+            <group position={position}>
+                <BrickVisual
+                    brickType={type}
+                    rotation={rotation}
+                    color={color}
+                    transparent={transparent}
                     onPointerDown={(e) => { if(onClick) { e.stopPropagation(); onClick(e); } }}
-                    onPointerMove={(e) => { 
-                        if(onPointerMove) { e.stopPropagation(); onPointerMove(e); }
-                    }}
-                    onPointerOver={(e) => { 
-                        if(deleteMode) { e.stopPropagation(); setHoveredBrick(id); } 
-                    }}
-                    onPointerOut={(e) => { 
-                        if(deleteMode) { setHoveredBrick(null); }
-                    }}
-                >
-                    {/* If deleteMode is active, this brick will check if it is the hovered one */}
-                    <PlasticMaterial color={color} hover={transparent} highlight={false} />
-                </RoundedBox>
-                <mesh position={[0, 1.1, 0]} castShadow receiveShadow>
-                    <cylinderGeometry args={[0.35, 0.35, 0.2, 24]} />
-                    <PlasticMaterial color={color} hover={transparent} highlight={false} />
-                </mesh>
+                    onPointerMove={(e) => { if(onPointerMove) { e.stopPropagation(); onPointerMove(e); } }}
+                    onPointerOver={(e) => { if(deleteMode) { e.stopPropagation(); setHoveredBrick(id); } }}
+                    onPointerOut={() => { if(deleteMode) { setHoveredBrick(null); } }}
+                />
             </group>
         );
 
-        // A wrapper to handle the highlight logic cleanly
         const InteractiveBrick = ({ id, hoveredBrickId, deleteMode, ...props }) => {
             const isHighlighted = deleteMode && hoveredBrickId === id;
             return (
-                <group position={props.position} rotation={[0, props.rotation, 0]}>
-                    <RoundedBox 
-                        args={[1, 1, 1]} radius={0.05} smoothness={4} position={[0, 0.5, 0]} 
-                        castShadow receiveShadow
+                <group position={props.position}>
+                    <BrickVisual
+                        brickType={props.type}
+                        rotation={props.rotation}
+                        color={props.color}
+                        highlight={isHighlighted}
                         onPointerDown={(e) => { e.stopPropagation(); props.onClick(e); }}
                         onPointerOver={(e) => { if(deleteMode) { e.stopPropagation(); props.setHoveredBrick(id); } }}
                         onPointerOut={() => { if(deleteMode) { props.setHoveredBrick(null); } }}
                         onPointerMove={(e) => { e.stopPropagation(); props.onPointerMove(e); }}
-                    >
-                        <PlasticMaterial color={props.color} highlight={isHighlighted} />
-                    </RoundedBox>
-                    <mesh position={[0, 1.1, 0]} castShadow receiveShadow>
-                        <cylinderGeometry args={[0.35, 0.35, 0.2, 24]} />
-                        <PlasticMaterial color={props.color} highlight={isHighlighted} />
-                    </mesh>
+                    />
                 </group>
             );
         }
@@ -262,6 +317,7 @@
 
         const SceneContent = ({ 
             bricks, hoverPos, activeColor, rotation,
+            activeBrickType,
             addBrick, removeBrick, setHoverPos,
             mode, showGrid, isDark, 
             soundEnabled, screenshotTrigger, onScreenshotTaken,
@@ -300,8 +356,8 @@
                 e.stopPropagation();
                 if (mode === 'delete') return; // Handled by brick onClick
                 if (hoverPos) {
-                    const exists = bricks.some(b => b.position[0]===hoverPos[0] && b.position[1]===hoverPos[1] && b.position[2]===hoverPos[2]);
-                    if (!exists) addBrick({ position: hoverPos, color: activeColor, rotation: rotation });
+                    const candidateBrick = { position: hoverPos, color: activeColor, rotation, type: activeBrickType };
+                    if (canPlaceBrick(bricks, candidateBrick)) addBrick(candidateBrick);
                 }
             };
 
@@ -323,6 +379,7 @@
                                 id={brick.id}
                                 position={brick.position}
                                 rotation={brick.rotation}
+                                type={brick.type || '1x1'}
                                 color={brick.color}
                                 deleteMode={mode === 'delete'}
                                 hoveredBrickId={hoveredBrickId}
@@ -336,7 +393,7 @@
                         ))}
                         
                         {mode === 'build' && hoverPos && (
-                            <Brick position={hoverPos} rotation={rotation} color={activeColor} transparent={true} />
+                            <Brick position={hoverPos} rotation={rotation} type={activeBrickType} color={activeColor} transparent={true} />
                         )}
 
                         <mesh rotation={[-Math.PI/2, 0, 0]} position={[0, -0.01, 0]} receiveShadow onPointerMove={handlePointerMove} onClick={handleClick}>
@@ -390,6 +447,7 @@
             const [history, setHistory] = useState([[]]);
             const [hoverPos, setHoverPos] = useState(null);
             const [activeColor, setActiveColor] = useState(PALETTE[0].hex);
+            const [activeBrickType, setActiveBrickType] = useState(BRICK_TYPES[0].id);
             const [rotation, setRotation] = useState(0);
             const [mode, setMode] = useState('build');
             const [showGrid, setShowGrid] = useState(true);
@@ -407,7 +465,7 @@
             }, []);
 
             const addBrick = (d) => { 
-                const n = [...bricks, { ...d, id: generateId() }]; 
+                const n = [...bricks, { ...d, type: d.type || '1x1', id: generateId() }]; 
                 setBricks(n); 
                 playSound('snap', soundEnabled);
             };
@@ -422,7 +480,7 @@
                 const presetData = PRESETS[name];
                 if (presetData) {
                     // Force a new array reference
-                    const newBricks = presetData.map(b => ({ ...b, id: generateId() }));
+                    const newBricks = presetData.map(b => ({ ...b, type: b.type || '1x1', id: generateId() }));
                     setBricks([...newBricks]); 
                     setShowLibrary(false);
                     if (name === "Empty Grid") playSound('clear', soundEnabled);
@@ -441,7 +499,12 @@
             const importBuild = (e) => {
                 const f = e.target.files[0]; if(!f) return;
                 const r = new FileReader();
-                r.onload = (ev) => { try { const p = JSON.parse(ev.target.result); if(Array.isArray(p)) { setBricks(p); } } catch(err){} };
+                r.onload = (ev) => { 
+                    try { 
+                        const p = JSON.parse(ev.target.result); 
+                        if(Array.isArray(p)) { setBricks(p.map(b => ({ ...b, type: b.type || '1x1' }))); } 
+                    } catch(err){} 
+                };
                 r.readAsText(f); e.target.value = '';
             };
 
@@ -463,6 +526,7 @@
                             <SceneContent
                                 bricks={bricks} hoverPos={hoverPos} setHoverPos={setHoverPos}
                                 activeColor={activeColor} rotation={rotation}
+                                activeBrickType={activeBrickType}
                                 addBrick={addBrick} removeBrick={removeBrick}
                                 mode={mode} showGrid={showGrid} isDark={isDark}
                                 setRotation={setRotation} saveBuild={saveBuild}
@@ -528,6 +592,20 @@
                         <div className="pointer-events-auto bg-white/90 backdrop-blur-md p-3 rounded-2xl shadow-xl flex gap-3 overflow-x-auto max-w-full w-auto no-scrollbar border-2 border-white/50">
                             {PALETTE.map(c => (
                                 <ColorButton key={c.hex} color={c.hex} active={activeColor === c.hex} onClick={() => setActiveColor(c.hex)} />
+                            ))}
+                        </div>
+
+                        <div className="pointer-events-auto bg-white/90 backdrop-blur-md p-3 rounded-2xl shadow-xl flex gap-2 overflow-x-auto max-w-full w-auto no-scrollbar border-2 border-white/50">
+                            {BRICK_TYPES.map(type => (
+                                <button
+                                    key={type.id}
+                                    onClick={() => setActiveBrickType(type.id)}
+                                    className={`min-w-[72px] px-3 py-2 rounded-xl border-2 font-black transition-all ${activeBrickType === type.id ? 'bg-blue-500 text-white border-blue-700 scale-105' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+                                    title={`${type.label} brick`}
+                                >
+                                    <div className="text-lg leading-none">{type.emoji}</div>
+                                    <div className="text-xs mt-1">{type.label}</div>
+                                </button>
                             ))}
                         </div>
 
