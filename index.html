@@ -84,12 +84,32 @@
       metal: { base: 650, wobble: 160, attack: 0.003, decay: 0.2 }
     };
 
+    let sharedAudioContext = null;
+    const getAudioContext = () => {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      if (!sharedAudioContext || sharedAudioContext.state === 'closed') sharedAudioContext = new Ctx();
+      if (sharedAudioContext.state === 'suspended') sharedAudioContext.resume();
+      return sharedAudioContext;
+    };
+
+    const isWithinGrid = (position, brickType, rotation = 0) => {
+      const t = BRICK_BY_ID[brickType] || BRICK_TYPES[0];
+      const turns = ((Math.round(rotation / (Math.PI / 2)) % 4) + 4) % 4;
+      const rotated = turns % 2 === 1;
+      const w = rotated ? t.depth : t.width;
+      const d = rotated ? t.width : t.depth;
+      const [x, y, z] = position;
+      const min = -GRID_SIZE;
+      const max = GRID_SIZE;
+      return x >= min && z >= min && y >= 0 && x + w - 1 <= max && z + d - 1 <= max;
+    };
+
     const playSound = (kind, enabled = true, profile = 'plastic', distanceFactor = 1) => {
       if (!enabled) return;
       try {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        if (!Ctx) return;
-        const ctx = new Ctx();
+        const ctx = getAudioContext();
+        if (!ctx) return;
         const now = ctx.currentTime;
         const vol = Math.max(0.015, 0.04 * distanceFactor);
 
@@ -128,9 +148,13 @@
       return cells;
     };
 
-    const canPlaceBrick = (bricks, draft) => {
+    const canPlaceBrick = (bricks, draft, ignoreId = null) => {
+      if (!isWithinGrid(draft.position, draft.type, draft.rotation || 0)) return false;
       const occupied = new Set();
-      bricks.forEach((b) => getFootprintCells(b).forEach((c) => occupied.add(`${c[0]},${c[1]},${c[2]}`)));
+      bricks.forEach((b) => {
+        if (ignoreId && b.id === ignoreId) return;
+        getFootprintCells(b).forEach((c) => occupied.add(`${c[0]},${c[1]},${c[2]}`));
+      });
       return getFootprintCells(draft).every((c) => !occupied.has(`${c[0]},${c[1]},${c[2]}`));
     };
 
@@ -192,7 +216,7 @@
       URL.revokeObjectURL(a.href);
     };
 
-    const SceneContent = ({ bricks, mode, hoverPos, setHoverPos, addBrick, removeBrick, moveBrick, activeColor, activeBrickType, rotation, screenshotTrigger, onScreenshotTaken, onCameraDirection }) => {
+    const SceneContent = ({ bricks, mode, hoverPos, setHoverPos, addBrick, removeBrick, moveBrick, activeColor, activeBrickType, rotation, screenshotTrigger, onScreenshotTaken, onCameraDirection, canPlaceCurrent }) => {
       const { gl, scene, camera } = useThree();
       const [draggingId, setDraggingId] = useState(null);
       useFrame(() => {
@@ -269,7 +293,7 @@
             </group>
           ))}
 
-          {mode === 'build' && hoverPos && <group position={hoverPos}><BrickVisual brickType={activeBrickType} color={activeColor} rotation={rotation} transparent /></group>}
+          {mode === 'build' && hoverPos && <group position={hoverPos}><BrickVisual brickType={activeBrickType} color={canPlaceCurrent ? activeColor : '#ef4444'} rotation={rotation} transparent /></group>}
 
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} onPointerMove={updateHover} onPointerUp={() => setDraggingId(null)} onClick={handleCanvasClick} receiveShadow>
             <planeGeometry args={[50, 50]} />
@@ -296,6 +320,7 @@
       const [history, setHistory] = useState([]);
       const [future, setFuture] = useState([]);
       const [cameraDirection, setCameraDirection] = useState([0.7, 0.15, 0.6]);
+      const [toast, setToast] = useState('Place your first brick to start your build!');
 
       useEffect(() => {
         try {
@@ -313,6 +338,21 @@
         setHistory([[]]);
       }, []);
 
+
+      useEffect(() => {
+        if (!toast) return;
+        const timer = setTimeout(() => setToast(''), 1800);
+        return () => clearTimeout(timer);
+      }, [toast]);
+
+      const canPlaceCurrent = useMemo(() => {
+        if (!hoverPos || mode !== 'build') return true;
+        return canPlaceBrick(bricks, { position: hoverPos, color: activeColor, rotation, type: activeBrickType });
+      }, [bricks, hoverPos, mode, activeColor, rotation, activeBrickType]);
+
+      const objectiveProgress = Math.min(100, Math.round((bricks.length / 12) * 100));
+      const objectiveLabel = bricks.length < 12 ? `Build to 12 bricks (${bricks.length}/12)` : `Great job! Keep experimenting (${bricks.length} bricks)`;
+
       const pushHistory = (next) => {
         setHistory((h) => [...h, JSON.parse(JSON.stringify(next))].slice(-120));
         setFuture([]);
@@ -328,13 +368,24 @@
         }
       };
 
-      const addBrick = (draft) => updateBricks([...bricks, { ...draft, id: generateId(), damage: 0, material: activeMaterial }], 'snap');
+      const addBrick = (draft) => {
+        if (!canPlaceBrick(bricks, draft)) return setToast('Can't place there. Try another spot.');
+        updateBricks([...bricks, { ...draft, id: generateId(), damage: 0, material: activeMaterial }], 'snap');
+      };
       const removeBrick = (id) => updateBricks(bricks.filter((b) => b.id !== id), 'delete');
       const moveBrick = (id, position) => {
-        setBricks((prev) => prev.map((b) => (b.id === id ? { ...b, position } : b)));
+        setBricks((prev) => {
+          const target = prev.find((b) => b.id === id);
+          if (!target) return prev;
+          const draft = { ...target, position };
+          if (!canPlaceBrick(prev, draft, id)) return prev;
+          return prev.map((b) => (b.id === id ? draft : b));
+        });
       };
 
-      const commitMove = () => pushHistory(bricks);
+      const commitMove = () => {
+        pushHistory(bricks);
+      };
 
       const undo = () => {
         if (history.length <= 1) return;
@@ -393,7 +444,10 @@
         }
       };
 
-      const loadPreset = (name) => updateBricks((PRESETS[name] || []).map((b) => ({ ...b, id: generateId(), damage: 0 })), 'snap');
+      const loadPreset = (name) => {
+        updateBricks((PRESETS[name] || []).map((b) => ({ ...b, id: generateId(), damage: 0 })), 'snap');
+        setToast(name === 'Empty Grid' ? 'Grid cleared.' : `${name} loaded.`);
+      };
 
       const exportMesh = (format) => {
         const geometry = buildMergedGeometry(bricks);
@@ -428,6 +482,7 @@
               screenshotTrigger={screenshotTrigger}
               onScreenshotTaken={() => setScreenshotTrigger(false)}
               onCameraDirection={setCameraDirection}
+              canPlaceCurrent={canPlaceCurrent}
             />
           </Canvas>
 
@@ -452,9 +507,9 @@
 
           <div className="absolute top-2 left-2 right-2 z-30 pointer-events-none">
             <div className="pointer-events-auto bg-white/92 backdrop-blur rounded-2xl shadow px-2 py-2 flex flex-wrap gap-2 items-center justify-center md:justify-start max-h-[44vh] overflow-y-auto">
-              <button className="min-h-[44px] px-3 rounded-xl bg-slate-100" onClick={() => setMode('build')}>Build</button>
-              <button className="min-h-[44px] px-3 rounded-xl bg-slate-100" onClick={() => setMode('move')}>Move</button>
-              <button className="min-h-[44px] px-3 rounded-xl bg-slate-100" onClick={() => setMode('delete')}>Delete</button>
+              <button className={`min-h-[44px] px-3 rounded-xl ${mode === 'build' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`} onClick={() => setMode('build')}>Build</button>
+              <button className={`min-h-[44px] px-3 rounded-xl ${mode === 'move' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`} onClick={() => setMode('move')}>Move</button>
+              <button className={`min-h-[44px] px-3 rounded-xl ${mode === 'delete' ? 'bg-blue-600 text-white' : 'bg-slate-100'}`} onClick={() => setMode('delete')}>Delete</button>
               <button className="min-h-[44px] px-3 rounded-xl bg-slate-100" onClick={() => setRotation((r) => r + Math.PI / 2)}>Rotate</button>
               <button className="min-h-[44px] px-3 rounded-xl bg-slate-100" onClick={undo}>Undo</button>
               <button className="min-h-[44px] px-3 rounded-xl bg-slate-100" onClick={redo}>Redo</button>
@@ -478,6 +533,18 @@
                 <input type="checkbox" checked={soundEnabled} onChange={(e) => setSoundEnabled(e.target.checked)} />
                 Sound
               </label>
+            </div>
+          </div>
+
+          <div className="absolute left-2 bottom-[124px] z-30 pointer-events-none max-w-xs">
+            <div className="pointer-events-auto bg-slate-900/88 text-white rounded-2xl p-3 shadow-lg">
+              <p className="text-xs uppercase tracking-wide text-slate-300">Objective</p>
+              <p className="text-sm font-semibold">{objectiveLabel}</p>
+              <div className="mt-2 h-2 rounded-full bg-slate-700 overflow-hidden">
+                <div className="h-full bg-emerald-400 transition-all" style={{ width: `${objectiveProgress}%` }} />
+              </div>
+              <p className="mt-2 text-xs text-slate-200">Mode: <strong>{mode}</strong>{mode === 'build' && !canPlaceCurrent ? ' • blocked position' : ''}</p>
+              {!!toast && <p className="mt-1 text-xs text-amber-300">{toast}</p>}
             </div>
           </div>
 
